@@ -1,22 +1,17 @@
 import { useState, useEffect } from "react";
+import { getConfig, getStatus, openDay, closeDay, syncQueue, getQueue } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { 
-  Activity, 
-  Clock, 
-  FileText, 
-  CheckCircle,
-  XCircle,
-  Info,
-  BellOff,
-  Send,
-  FileCheck,
-  FileX
+import {
+  Table, TableBody, TableCell, TableHead,
+  TableHeader, TableRow
+} from "@/components/ui/table";
+import {
+  Activity, Clock, FileText, CheckCircle, XCircle, Info, BellOff, Send, FileCheck, FileX
 } from "lucide-react";
 
 interface LogEntry {
@@ -34,329 +29,250 @@ interface Invoice {
   status: 'signed' | 'sent' | 'excluded';
 }
 
+interface ReceiptItem {
+  receipt: {
+    invoice_number?: string;
+    total?: number;
+    date?: string;
+  };
+  pdf_path?: string;
+}
+
 const Index = () => {
+  const [clientName, setClientName] = useState("Client");
   const [isOnline, setIsOnline] = useState(true);
   const [fiscalDayOpen, setFiscalDayOpen] = useState(false);
   const [watcherRunning, setWatcherRunning] = useState(true);
-  const [logs, setLogs] = useState<LogEntry[]>([
-    {
-      id: '1',
-      timestamp: new Date(),
-      type: 'info',
-      message: 'System started successfully'
-    },
-    {
-      id: '2',
-      timestamp: new Date(Date.now() - 5000),
-      type: 'success',
-      message: 'Invoice INV-001 processed and sent to fiscal backend'
-    }
-  ]);
-
-  const [invoices] = useState<Invoice[]>([
-    { id: '1', number: 'INV-001', amount: 1250.00, date: new Date(), status: 'signed' },
-    { id: '2', number: 'INV-002', amount: 850.50, date: new Date(Date.now() - 86400000), status: 'sent' },
-    { id: '3', number: 'INV-003', amount: 2100.75, date: new Date(Date.now() - 172800000), status: 'excluded' },
-    { id: '4', number: 'INV-004', amount: 675.25, date: new Date(Date.now() - 259200000), status: 'signed' },
-  ]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
 
   const addLog = (type: LogEntry['type'], message: string) => {
-    const newLog: LogEntry = {
-      id: Date.now().toString(),
-      timestamp: new Date(),
-      type,
-      message
+    setLogs(prev => [{ id: Date.now().toString(), timestamp: new Date(), type, message }, ...prev.slice(0, 49)]);
+  };
+
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const data = await getStatus();
+        setIsOnline(data.online);
+        setFiscalDayOpen(data.fiscal_day_open);
+        setWatcherRunning(data.watcher_running);
+      } catch {
+        setIsOnline(false);
+      }
     };
-    setLogs(prev => [newLog, ...prev.slice(0, 49)]);
-  };
 
-  const handleOpenDay = () => {
-    if (!fiscalDayOpen) {
-      setFiscalDayOpen(true);
-      addLog('success', 'Fiscal day opened');
+    const fetchInvoices = async () => {
+      try {
+        const data: ReceiptItem[] = await getQueue();
+        const mappedInvoices = data.map((item, index) => ({
+          id: index.toString(),
+          number: item.receipt?.invoice_number || `INV-${index + 1}`,
+          amount: item.receipt?.total || 0,
+          date: new Date(item.receipt?.date || Date.now()),
+          status: 'signed' as const,
+        }));
+        setInvoices(mappedInvoices);
+      } catch {
+        addLog("error", "Failed to fetch receipt queue");
+      }
+    };
+
+    const loadClientName = async () => {
+      const cachedName = localStorage.getItem("clientName");
+      if (cachedName) {
+        setClientName(cachedName);
+      } else {
+        try {
+          const config = await getConfig();
+          const tradeName = config.trade_name || "Client";
+          localStorage.setItem("clientName", tradeName);
+          setClientName(tradeName);
+        } catch {
+          addLog("error", "Failed to fetch client name");
+        }
+      }
+    };
+
+    loadClientName();
+    fetchStatus();
+    fetchInvoices();
+
+    const interval = setInterval(() => {
+      fetchStatus();
+      fetchInvoices();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleOpenDay = async () => {
+    try {
+      const res = await openDay();
+      if (res.success) {
+        setFiscalDayOpen(true);
+        addLog("success", "Fiscal day opened");
+      } else {
+        addLog("error", res.message || "Failed to open fiscal day");
+      }
+    } catch {
+      addLog("error", "Backend error: failed to open day");
     }
   };
 
-  const handleCloseDay = () => {
-    if (fiscalDayOpen) {
-      setFiscalDayOpen(false);
-      addLog('success', 'Fiscal day closed');
+  const handleCloseDay = async () => {
+    try {
+      const res = await closeDay();
+      if (res.success) {
+        setFiscalDayOpen(false);
+        addLog("success", "Fiscal day closed via backend");
+      } else {
+        addLog("error", res.message || "Failed to close fiscal day");
+      }
+    } catch {
+      addLog("error", "Backend error: failed to close day");
     }
   };
 
-  const handleForceSync = () => {
-    addLog('info', 'Force sync initiated - checking for failed receipts');
-    setTimeout(() => {
-      addLog('success', 'Force sync completed - 2 receipts retried');
-    }, 2000);
+  const handleForceSync = async () => {
+    addLog("info", "Force sync initiated...");
+    try {
+      const res = await syncQueue();
+      if (res.success) {
+        addLog("success", res.message || "Receipts synced successfully");
+      } else {
+        addLog("error", res.message || "Sync failed");
+      }
+    } catch {
+      addLog("error", "Backend error during sync");
+    }
   };
 
-  const handleGetStatus = () => {
+  const handleGetStatus = async () => {
     addLog('info', 'Getting system status...');
-    setTimeout(() => {
+    try {
+      const data = await getStatus();
       addLog('success', 'System status retrieved successfully');
-    }, 1500);
-  };
-
-  const handleGetConfig = () => {
-    addLog('info', 'Retrieving configuration...');
-    setTimeout(() => {
-      addLog('success', 'Configuration loaded successfully');
-    }, 1500);
-  };
-
-  const getStatusColor = (status: boolean) => {
-    return status ? "bg-green-500" : "bg-red-500";
-  };
-
-  const getLogIcon = (type: LogEntry['type']) => {
-    switch (type) {
-      case 'success':
-        return <CheckCircle className="h-4 w-4 text-green-600" />;
-      case 'error':
-        return <XCircle className="h-4 w-4 text-red-600" />;
-      default:
-        return <Info className="h-4 w-4 text-blue-600" />;
+      setIsOnline(data.online);
+      setFiscalDayOpen(data.fiscal_day_open);
+      setWatcherRunning(data.watcher_running);
+    } catch {
+      addLog('error', 'Failed to get system status');
     }
   };
 
-  const getInvoicesByStatus = (status: 'signed' | 'sent' | 'excluded') => {
-    return invoices.filter(invoice => invoice.status === status);
-  };
-
-  const getStatusBadgeVariant = (status: string) => {
-    switch (status) {
-      case 'signed':
-        return 'default';
-      case 'sent':
-        return 'secondary';
-      case 'excluded':
-        return 'destructive';
-      default:
-        return 'outline';
+  const handleGetConfig = async () => {
+    addLog('info', 'Getting system config...');
+    try {
+      const config = await getConfig();
+      addLog('success', 'Configuration retrieved successfully');
+      console.log("Config:", config);
+    } catch {
+      addLog('error', 'Failed to retrieve configuration');
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'signed':
-        return <FileCheck className="h-4 w-4 text-green-600" />;
-      case 'sent':
-        return <Send className="h-4 w-4" />;
-      case 'excluded':
-        return <FileX className="h-4 w-4" />;
-      default:
-        return <FileText className="h-4 w-4" />;
-    }
-  };
+  const getStatusColor = (status: boolean) => status ? "bg-green-500" : "bg-red-500";
+  const getLogIcon = (type: LogEntry['type']) =>
+    type === 'success' ? <CheckCircle className="h-4 w-4 text-green-600" /> :
+      type === 'error' ? <XCircle className="h-4 w-4 text-red-600" /> :
+        <Info className="h-4 w-4 text-blue-600" />;
+
+  const getInvoicesByStatus = (status: Invoice['status']) => invoices.filter(i => i.status === status);
+  const getStatusBadgeVariant = (status: Invoice['status']) =>
+    status === 'signed' ? 'default' :
+      status === 'sent' ? 'secondary' : 'destructive';
+  const getStatusIcon = (status: Invoice['status']) =>
+    status === 'signed' ? <FileCheck className="h-4 w-4 text-green-600" /> :
+      status === 'sent' ? <Send className="h-4 w-4" /> :
+        <FileX className="h-4 w-4" />;
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto space-y-4">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="text-lg font-semibold text-gray-700">
-            Fiscal System Version 1.0.0.4
-          </div>
-          <div className="text-lg font-semibold text-gray-700">
-            Client Name
-          </div>
+        <div className="flex justify-between">
+          <div className="text-lg font-semibold text-gray-700">Fiscal System Version 1.0.0.4</div>
+          <div className="text-lg font-semibold text-gray-700">{clientName}</div>
         </div>
 
-        {/* Status Section */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center">
-                <Activity className="h-4 w-4 mr-2" />
-                Operating Mode
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pb-3">
-              <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${getStatusColor(isOnline)}`}></div>
-                <span className="font-medium text-sm">{isOnline ? 'Online' : 'Offline'}</span>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid md:grid-cols-3 gap-3">
+          <Card><CardHeader><CardTitle className="text-sm flex items-center">
+            <Activity className="h-4 w-4 mr-2" />Operating Mode</CardTitle></CardHeader>
+            <CardContent><div className="flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded-full ${getStatusColor(isOnline)}`} />
+              <span className="font-medium text-sm">{isOnline ? 'Online' : 'Offline'}</span></div></CardContent></Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center">
-                <Clock className="h-4 w-4 mr-2" />
-                Fiscal Day
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pb-3">
-              <div className="flex items-center space-x-2">
-                <Badge variant={fiscalDayOpen ? "default" : "secondary"} className="text-xs">
-                  {fiscalDayOpen ? 'Open' : 'Closed'}
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
+          <Card><CardHeader><CardTitle className="text-sm flex items-center">
+            <Clock className="h-4 w-4 mr-2" />Fiscal Day</CardTitle></CardHeader>
+            <CardContent><Badge variant={fiscalDayOpen ? "default" : "secondary"} className="text-xs">
+              {fiscalDayOpen ? 'Open' : 'Closed'}</Badge></CardContent></Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center">
-                <FileText className="h-4 w-4 mr-2" />
-                File Watcher
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pb-3">
-              <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${getStatusColor(watcherRunning)}`}></div>
-                <span className="font-medium text-sm">{watcherRunning ? 'Running' : 'Stopped'}</span>
-              </div>
-            </CardContent>
-          </Card>
+          <Card><CardHeader><CardTitle className="text-sm flex items-center">
+            <FileText className="h-4 w-4 mr-2" />File Watcher</CardTitle></CardHeader>
+            <CardContent><div className="flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded-full ${getStatusColor(watcherRunning)}`} />
+              <span className="font-medium text-sm">{watcherRunning ? 'Running' : 'Stopped'}</span></div></CardContent></Card>
         </div>
 
-        {/* Operations Section */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Operations</CardTitle>
-          </CardHeader>
-          <CardContent className="pb-3">
-            <div className="flex flex-wrap gap-2">
-              <Button 
-                onClick={handleOpenDay}
-                disabled={fiscalDayOpen}
-                variant={fiscalDayOpen ? "outline" : "default"}
-                size="sm"
-                className={!fiscalDayOpen ? "bg-green-600 hover:bg-green-700" : ""}
-              >
-                Open Fiscal Day
-              </Button>
-              
-              <Button 
-                onClick={handleCloseDay}
-                disabled={!fiscalDayOpen}
-                variant={!fiscalDayOpen ? "outline" : "destructive"}
-                size="sm"
-              >
-                Close Fiscal Day
-              </Button>
-              
-              <Separator orientation="vertical" className="h-6" />
-              
-              <Button 
-                onClick={handleForceSync}
-                variant="outline"
-                size="sm"
-              >
-                Force Sync
-              </Button>
+        <Card><CardHeader><CardTitle className="text-sm">Operations</CardTitle></CardHeader>
+          <CardContent><div className="flex flex-wrap gap-2">
+            <Button onClick={handleOpenDay} disabled={fiscalDayOpen} size="sm" className={!fiscalDayOpen ? "bg-green-600 hover:bg-green-700" : ""}>
+              Open Fiscal Day</Button>
+            <Button onClick={handleCloseDay} disabled={!fiscalDayOpen} variant="destructive" size="sm">Close Fiscal Day</Button>
+            <Separator orientation="vertical" className="h-6" />
+            <Button onClick={handleForceSync} variant="outline" size="sm">Force Sync</Button>
+            <Button onClick={handleGetStatus} variant="outline" size="sm">Get Status</Button>
+            <Button onClick={handleGetConfig} variant="outline" size="sm">Get Config</Button>
+          </div></CardContent></Card>
 
-              <Button 
-                onClick={handleGetStatus}
-                variant="outline"
-                size="sm"
-              >
-                Get Status
-              </Button>
-
-              <Button 
-                onClick={handleGetConfig}
-                variant="outline"
-                size="sm"
-              >
-                Get Config
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Receipt Centre Section */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Receipt Centre</CardTitle>
-          </CardHeader>
-          <CardContent className="pb-3">
+        <Card><CardHeader><CardTitle className="text-sm">Receipt Centre</CardTitle></CardHeader>
+          <CardContent>
             <Tabs defaultValue="signed" className="w-full">
               <TabsList className="grid w-full grid-cols-3 h-8">
-                <TabsTrigger value="signed" className="flex items-center gap-1 text-xs">
-                  <FileCheck className="h-3 w-3" />
-                  Signed ({getInvoicesByStatus('signed').length})
-                </TabsTrigger>
-                <TabsTrigger value="sent" className="flex items-center gap-1 text-xs">
-                  <Send className="h-3 w-3" />
-                  Sent ({getInvoicesByStatus('sent').length})
-                </TabsTrigger>
-                <TabsTrigger value="excluded" className="flex items-center gap-1 text-xs">
-                  <FileX className="h-3 w-3" />
-                  Excluded ({getInvoicesByStatus('excluded').length})
-                </TabsTrigger>
+                {["signed", "sent", "excluded"].map(s => (
+                  <TabsTrigger key={s} value={s} className="flex items-center gap-1 text-xs">
+                    {getStatusIcon(s as Invoice['status'])}
+                    {s.charAt(0).toUpperCase() + s.slice(1)} ({getInvoicesByStatus(s as Invoice['status']).length})
+                  </TabsTrigger>
+                ))}
               </TabsList>
-              
-              {(['signed', 'sent', 'excluded'] as const).map((status) => (
-                <TabsContent key={status} value={status} className="mt-2">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="h-8">
-                        <TableHead className="text-xs">Invoice #</TableHead>
-                        <TableHead className="text-xs">Date</TableHead>
-                        <TableHead className="text-xs">Amount</TableHead>
-                        <TableHead className="text-xs">Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {getInvoicesByStatus(status).map((invoice) => (
-                        <TableRow key={invoice.id} className="h-8">
-                          <TableCell className="font-medium text-xs">{invoice.number}</TableCell>
-                          <TableCell className="text-xs">{invoice.date.toLocaleDateString()}</TableCell>
-                          <TableCell className="text-xs">${invoice.amount.toFixed(2)}</TableCell>
-                          <TableCell>
-                            <Badge variant={getStatusBadgeVariant(invoice.status)} className="flex items-center gap-1 w-fit text-xs h-5">
-                              {getStatusIcon(invoice.status)}
-                              {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+              {["signed", "sent", "excluded"].map(s => (
+                <TabsContent key={s} value={s} className="mt-2">
+                  <Table><TableHeader><TableRow className="h-8">
+                    <TableHead className="text-xs">Invoice #</TableHead>
+                    <TableHead className="text-xs">Date</TableHead>
+                    <TableHead className="text-xs">Amount</TableHead>
+                    <TableHead className="text-xs">Status</TableHead></TableRow></TableHeader>
+                    <TableBody>{getInvoicesByStatus(s as Invoice['status']).map(inv => (
+                      <TableRow key={inv.id} className="h-8">
+                        <TableCell className="text-xs">{inv.number}</TableCell>
+                        <TableCell className="text-xs">{inv.date.toLocaleDateString()}</TableCell>
+                        <TableCell className="text-xs">${inv.amount.toFixed(2)}</TableCell>
+                        <TableCell><Badge variant={getStatusBadgeVariant(inv.status)} className="flex items-center gap-1 w-fit text-xs h-5">
+                          {getStatusIcon(inv.status)}{inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}</Badge></TableCell>
+                      </TableRow>))}</TableBody></Table>
                 </TabsContent>
               ))}
             </Tabs>
-          </CardContent>
-        </Card>
+          </CardContent></Card>
 
-        {/* System Status Alert */}
-        {!isOnline && (
-          <Alert className="py-2">
-            <BellOff className="h-4 w-4" />
-            <AlertDescription className="text-sm">
-              System is running in offline mode. Invoices will be queued and sent when connection is restored.
-            </AlertDescription>
-          </Alert>
-        )}
+        {!isOnline && <Alert className="py-2"><BellOff className="h-4 w-4" />
+          <AlertDescription className="text-sm">
+            System is offline. Invoices will queue until connection restores.
+          </AlertDescription></Alert>}
 
-        {/* Activity Log Section */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center text-sm">
-              <Activity className="h-4 w-4 mr-2" />
-              Activity Log
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pb-3">
-            <div className="space-y-2 max-h-80 overflow-y-auto">
-              {logs.map((log) => (
-                <div key={log.id} className="flex items-start space-x-2 p-2 rounded-lg bg-gray-50">
-                  {getLogIcon(log.type)}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-900">{log.message}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {log.timestamp.toLocaleTimeString()}
-                    </p>
-                  </div>
+        <Card><CardHeader><CardTitle className="flex items-center text-sm">
+          <Activity className="h-4 w-4 mr-2" />Activity Log</CardTitle></CardHeader>
+          <CardContent><div className="space-y-2 max-h-80 overflow-y-auto">
+            {logs.map(log => (
+              <div key={log.id} className="flex items-start space-x-2 p-2 rounded-lg bg-gray-50">
+                {getLogIcon(log.type)}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs">{log.message}</p>
+                  <p className="text-xs text-gray-500">{log.timestamp.toLocaleTimeString()}</p>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            ))}</div></CardContent></Card>
 
       </div>
     </div>
