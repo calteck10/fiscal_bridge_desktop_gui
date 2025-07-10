@@ -1,4 +1,3 @@
-// src/pages/Index.tsx
 import { useState, useEffect } from "react";
 import {
   getConfig,
@@ -6,32 +5,50 @@ import {
   openDay,
   closeDay,
   syncQueue,
-  getQueue
+  getQueue,
 } from "@/lib/api";
 
 import {
-  Card, CardContent, CardHeader, CardTitle
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-  Tabs, TabsContent, TabsList, TabsTrigger
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@/components/ui/tabs";
 import {
-  Table, TableBody, TableCell, TableHead,
-  TableHeader, TableRow
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Activity, Clock, FileText, CheckCircle,
-  XCircle, Info, BellOff, Send, FileCheck, FileX
+  Activity,
+  Clock,
+  FileText,
+  CheckCircle,
+  XCircle,
+  Info,
+  BellOff,
+  Send,
+  FileCheck,
+  FileX,
 } from "lucide-react";
 
 interface LogEntry {
   id: string;
   timestamp: Date;
-  type: 'success' | 'error' | 'info';
+  type: "success" | "error" | "info";
   message: string;
 }
 
@@ -40,7 +57,7 @@ interface Invoice {
   number: string;
   amount: number;
   date: Date;
-  status: 'signed' | 'sent' | 'excluded';
+  status: "signed" | "sent" | "excluded";
 }
 
 interface ReceiptItem {
@@ -56,11 +73,11 @@ interface ConfigData {
   trade_name?: string;
   tin?: string;
   vat_number?: string;
-  platform?: string;
+  platform?: "android" | "windows" | string;
   serial_number?: string;
   device_id?: string;
-  fiscalisation_mode?: string;
-  environment?: string;
+  fiscalisation_mode?: "test" | "production" | string;
+  environment?: "dev" | "test" | "prod" | string;
   token_loaded?: boolean;
 }
 
@@ -73,10 +90,10 @@ const Index = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [config, setConfig] = useState<ConfigData>({});
 
-  const addLog = (type: LogEntry['type'], message: string) => {
-    setLogs(prev => [
+  const addLog = (type: LogEntry["type"], message: string) => {
+    setLogs((prev) => [
       { id: Date.now().toString(), timestamp: new Date(), type, message },
-      ...prev.slice(0, 49)
+      ...prev.slice(0, 49),
     ]);
   };
 
@@ -97,35 +114,35 @@ const Index = () => {
     const fetchInvoices = async () => {
       try {
         const data: ReceiptItem[] = await getQueue();
-        const mappedInvoices = data.map((item, index) => ({
+        const mapped = data.map((item, index) => ({
           id: index.toString(),
           number: item.receipt?.invoice_number || `INV-${index + 1}`,
           amount: item.receipt?.total || 0,
           date: new Date(item.receipt?.date || Date.now()),
-          status: 'signed' as const,
+          status: "signed" as const,
         }));
-        setInvoices(mappedInvoices);
+        setInvoices(mapped);
       } catch {
         addLog("error", "Failed to fetch receipt queue");
       }
     };
 
-    const loadConfigAndClientName = async () => {
+    const loadConfig = async () => {
       try {
         const fetched = await getConfig();
         setConfig(fetched);
-        const name = fetched.trade_name || "Client";
-        localStorage.setItem("clientName", name);
-        setClientName(name);
+        localStorage.setItem("clientName", fetched.trade_name || "Client");
+        setClientName(fetched.trade_name || "Client");
         addLog("success", "System config loaded");
       } catch {
         addLog("error", "Failed to load config");
       }
     };
 
-    loadConfigAndClientName();
+    loadConfig();
     fetchStatus();
     fetchInvoices();
+
     const interval = setInterval(() => {
       fetchStatus();
       fetchInvoices();
@@ -200,43 +217,65 @@ const Index = () => {
     }
   };
 
-  const getStatusColor = (status: boolean) => status ? "bg-green-500" : "bg-red-500";
-  const getLogIcon = (type: LogEntry['type']) =>
-    type === "success" ? <CheckCircle className="h-4 w-4 text-green-600" /> :
-      type === "error" ? <XCircle className="h-4 w-4 text-red-600" /> :
-        <Info className="h-4 w-4 text-blue-600" />;
+  const getStatusColor = (status: boolean) =>
+    status ? "bg-green-500" : "bg-red-500";
 
-  const getInvoicesByStatus = (status: Invoice['status']) =>
-    invoices.filter(i => i.status === status);
+  const getLogIcon = (type: LogEntry["type"]) =>
+    type === "success" ? (
+      <CheckCircle className="h-4 w-4 text-green-600" />
+    ) : type === "error" ? (
+      <XCircle className="h-4 w-4 text-red-600" />
+    ) : (
+      <Info className="h-4 w-4 text-blue-600" />
+    );
 
-  const getStatusBadgeVariant = (status: Invoice['status']) =>
-    status === "signed" ? "default" :
-      status === "sent" ? "secondary" : "destructive";
+  const getInvoicesByStatus = (status: Invoice["status"]) =>
+    invoices.filter((i) => i.status === status);
 
-  const getStatusIcon = (status: Invoice['status']) =>
-    status === "signed" ? <FileCheck className="h-4 w-4 text-green-600" /> :
-      status === "sent" ? <Send className="h-4 w-4" /> :
-        <FileX className="h-4 w-4" />;
+  const getStatusBadgeVariant = (status: Invoice["status"]) =>
+    status === "signed"
+      ? "default"
+      : status === "sent"
+      ? "secondary"
+      : "destructive";
+
+  const getStatusIcon = (status: Invoice["status"]) =>
+    status === "signed" ? (
+      <FileCheck className="h-4 w-4 text-green-600" />
+    ) : status === "sent" ? (
+      <Send className="h-4 w-4" />
+    ) : (
+      <FileX className="h-4 w-4" />
+    );
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
+    <div className="min-h-screen bg-gray-50 p-4 overflow-hidden">
       <div className="max-w-6xl mx-auto space-y-4">
         <div className="flex justify-between">
-          <div className="text-lg font-semibold text-gray-700">Fiscal System Version 1.0.0.4</div>
-          <div className="text-lg font-semibold text-gray-700">{clientName}</div>
+          <div className="text-lg font-semibold text-gray-700">
+            Fiscal System Version 1.0.0.4
+          </div>
+          <div className="text-lg font-semibold text-gray-700">
+            {clientName}
+          </div>
         </div>
 
         <div className="grid md:grid-cols-3 gap-3">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm flex items-center">
-                <Activity className="h-4 w-4 mr-2" />Operating Mode
+                <Activity className="h-4 w-4 mr-2" />
+                Operating Mode
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${getStatusColor(isOnline)}`} />
-                <span className="font-medium text-sm">{isOnline ? 'Online' : 'Offline'}</span>
+                <div
+                  className={`w-3 h-3 rounded-full ${getStatusColor(isOnline)}`}
+                />
+                <span className="font-medium text-sm">
+                  {isOnline ? "Online" : "Offline"}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -244,7 +283,8 @@ const Index = () => {
           <Card>
             <CardHeader>
               <CardTitle className="text-sm flex items-center">
-                <Clock className="h-4 w-4 mr-2" />Fiscal Day
+                <Clock className="h-4 w-4 mr-2" />
+                Fiscal Day
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -257,88 +297,69 @@ const Index = () => {
           <Card>
             <CardHeader>
               <CardTitle className="text-sm flex items-center">
-                <FileText className="h-4 w-4 mr-2" />File Watcher
+                <FileText className="h-4 w-4 mr-2" />
+                File Watcher
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${getStatusColor(watcherRunning)}`} />
-                <span className="font-medium text-sm">{watcherRunning ? 'Running' : 'Stopped'}</span>
+                <div
+                  className={`w-3 h-3 rounded-full ${getStatusColor(
+                    watcherRunning
+                  )}`}
+                />
+                <span className="font-medium text-sm">
+                  {watcherRunning ? "Running" : "Stopped"}
+                </span>
               </div>
             </CardContent>
           </Card>
         </div>
 
         <Card>
-          <CardHeader><CardTitle className="text-sm">Operations</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-sm">Operations</CardTitle>
+          </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={handleOpenDay} size="sm" className="bg-green-600 hover:bg-green-700">Open Fiscal Day</Button>
-              <Button onClick={handleCloseDay} variant="destructive" size="sm">Close Fiscal Day</Button>
+              <Button
+                onClick={handleOpenDay}
+                size="sm"
+                className="bg-green-600 hover:bg-green-700"
+              >
+                Open Fiscal Day
+              </Button>
+              <Button onClick={handleCloseDay} variant="destructive" size="sm">
+                Close Fiscal Day
+              </Button>
               <Separator orientation="vertical" className="h-6" />
-              <Button onClick={handleForceSync} variant="outline" size="sm">Force Sync</Button>
-              <Button onClick={handleGetStatus} variant="outline" size="sm">Get Status</Button>
-              <Button onClick={handleGetConfig} variant="outline" size="sm">Get Config</Button>
+              <Button onClick={handleForceSync} variant="outline" size="sm">
+                Force Sync
+              </Button>
+              <Button onClick={handleGetStatus} variant="outline" size="sm">
+                Get Status
+              </Button>
+              <Button onClick={handleGetConfig} variant="outline" size="sm">
+                Get Config
+              </Button>
             </div>
           </CardContent>
         </Card>
 
-        {/* ✅ Receipt Centre Tabs */}
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Receipt Centre</CardTitle></CardHeader>
-          <CardContent>
-            <Tabs defaultValue="signed" className="w-full">
-              <TabsList className="grid w-full grid-cols-3 h-8">
-                {["signed", "sent", "excluded"].map(s => (
-                  <TabsTrigger key={s} value={s} className="flex items-center gap-1 text-xs">
-                    {getStatusIcon(s as Invoice['status'])}
-                    {s.charAt(0).toUpperCase() + s.slice(1)} ({getInvoicesByStatus(s as Invoice['status']).length})
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              {["signed", "sent", "excluded"].map(s => (
-                <TabsContent key={s} value={s} className="mt-2">
-                  {getInvoicesByStatus(s as Invoice['status']).length > 0 ? (
-                    <Table>
-                      <TableHeader><TableRow>
-                        <TableHead className="text-xs">Invoice #</TableHead>
-                        <TableHead className="text-xs">Date</TableHead>
-                        <TableHead className="text-xs">Amount</TableHead>
-                        <TableHead className="text-xs">Status</TableHead>
-                      </TableRow></TableHeader>
-                      <TableBody>
-                        {getInvoicesByStatus(s as Invoice['status']).map(inv => (
-                          <TableRow key={inv.id}>
-                            <TableCell className="text-xs">{inv.number}</TableCell>
-                            <TableCell className="text-xs">{inv.date.toLocaleDateString()}</TableCell>
-                            <TableCell className="text-xs">${inv.amount.toFixed(2)}</TableCell>
-                            <TableCell>
-                              <Badge variant={getStatusBadgeVariant(inv.status)} className="flex items-center gap-1 w-fit text-xs h-5">
-                                {getStatusIcon(inv.status)}
-                                {inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  ) : (
-                    <div className="text-xs text-gray-500 p-4">No {s} invoices found.</div>
-                  )}
-                </TabsContent>
-              ))}
-            </Tabs>
-          </CardContent>
-        </Card>
-
-        {/* Config Viewer */}
         {Object.keys(config).length > 0 && (
           <Card>
-            <CardHeader><CardTitle className="text-sm">Current Config</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-sm">Current Config</CardTitle>
+            </CardHeader>
             <CardContent className="text-xs space-y-1">
               {Object.entries(config).map(([key, val]) => (
-                <div key={key} className="flex justify-between border-b py-1">
-                  <span className="font-medium text-gray-600">{key.replace(/_/g, ' ')}</span>
+                <div
+                  key={key}
+                  className="flex justify-between border-b py-1"
+                >
+                  <span className="font-medium text-gray-600">
+                    {key.replace(/_/g, " ")}
+                  </span>
                   <span className="text-gray-800">{String(val)}</span>
                 </div>
               ))}
@@ -358,17 +379,23 @@ const Index = () => {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center text-sm">
-              <Activity className="h-4 w-4 mr-2" />Activity Log
+              <Activity className="h-4 w-4 mr-2" />
+              Activity Log
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2 max-h-80 overflow-y-auto">
-              {logs.map(log => (
-                <div key={log.id} className="flex items-start space-x-2 p-2 rounded-lg bg-gray-50">
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {logs.map((log) => (
+                <div
+                  key={log.id}
+                  className="flex items-start space-x-2 p-2 rounded-lg bg-gray-50"
+                >
                   {getLogIcon(log.type)}
                   <div className="flex-1 min-w-0">
                     <p className="text-xs">{log.message}</p>
-                    <p className="text-xs text-gray-500">{log.timestamp.toLocaleTimeString()}</p>
+                    <p className="text-xs text-gray-500">
+                      {log.timestamp.toLocaleTimeString()}
+                    </p>
                   </div>
                 </div>
               ))}
